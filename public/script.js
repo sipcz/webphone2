@@ -1,246 +1,91 @@
-// ================== БАЗА ==================
-
-// WebSocket на Render
 const ws = new WebSocket(`wss://${window.location.host}`);
 
+let pc = null;
 let localStream = null;
 let remoteStream = null;
-let peerConnection = null;
+let roomId = null;
 
 const servers = {
-  iceServers: [
-    { urls: "stun:stun.l.google.com:19302" }
-  ]
+  iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
 };
 
-const joinButton = document.getElementById("joinRoom");
-const startCallBtn = document.getElementById("startCall");
-const answerCallBtn = document.getElementById("answerCall");
-const hangupBtn = document.getElementById("hangup");
-const callUI = document.getElementById("callUI");
-const statusSpan = document.getElementById("status");
-const localVideo = document.getElementById("localVideo");
-const remoteVideo = document.getElementById("remoteVideo");
+document.getElementById("join").onclick = () => {
+  roomId = document.getElementById("room").value.trim();
+  if (!roomId) return alert("Введіть ID кімнати");
 
-// Логи
-ws.onopen = () => console.log("WS CONNECTED");
-ws.onerror = (e) => console.log("WS ERROR", e);
-ws.onclose = () => console.log("WS CLOSED");
-
-// ================== JOIN / SIGNALING ==================
-
-// Вхід у кімнату
-joinButton.onclick = () => {
-  const roomId = document.getElementById("roomId").value.trim();
-  const pin = document.getElementById("pin").value.trim();
-
-  if (!roomId || !pin) {
-    alert("Введи ID кімнати та PIN");
-    return;
-  }
-
-  if (ws.readyState !== WebSocket.OPEN) {
-    alert("WebSocket не підключений");
-    return;
-  }
-
-  ws.send(JSON.stringify({
-    type: "join",
-    roomId,
-    pin
-  }));
-
-  console.log("JOIN SENT", roomId, pin);
+  ws.send(JSON.stringify({ type: "join", roomId }));
 };
 
-// Обробка сигналінгу
 ws.onmessage = async (event) => {
   const data = JSON.parse(event.data);
-  console.log("WS MESSAGE", data);
-
-  if (data.type === "error") {
-    alert(data.message);
-    return;
-  }
-
-  if (data.type === "joined") {
-    statusSpan.textContent = "Підключено до кімнати. Можна починати дзвінок.";
-    callUI.classList.remove("hidden");
-    return;
-  }
 
   if (data.type === "offer") {
-    await handleOffer(data.offer);
-    return;
+    window.incomingOffer = data.offer;
+    alert("Вхідний дзвінок. Натисніть 'Відповісти'");
   }
 
   if (data.type === "answer") {
-    if (!peerConnection) return;
-    if (peerConnection.signalingState !== "have-local-offer") {
-      console.warn("Ignoring answer in state:", peerConnection.signalingState);
-      return;
-    }
-    await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
-    statusSpan.textContent = "Зʼєднано. Йде дзвінок.";
-    return;
+    await pc.setRemoteDescription(data.answer);
   }
 
   if (data.type === "ice") {
-    if (!peerConnection || peerConnection.signalingState === "closed") return;
-    try {
-      await peerConnection.addIceCandidate(data.candidate);
-    } catch (e) {
-      console.warn("ICE ignored:", e);
-    }
+    if (pc) await pc.addIceCandidate(data.candidate);
   }
 };
 
-// ================== КНОПКИ ДЗВІНКА ==================
+document.getElementById("callBtn").onclick = async () => {
+  await startLocalMedia();   // ← мобільний браузер дозволяє тільки після кліку
+  await createConnection();
 
-// Старт дзвінка (ініціатор)
-startCallBtn.onclick = async () => {
-  if (ws.readyState !== WebSocket.OPEN) {
-    alert("WebSocket не підключений");
-    return;
-  }
-  await setupConnection(true);
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+
+  ws.send(JSON.stringify({ type: "offer", roomId, offer }));
 };
 
-// Відповісти
-answerCallBtn.onclick = () => {
-  alert("Очікуємо вхідний дзвінок…");
+document.getElementById("answerBtn").onclick = async () => {
+  if (!window.incomingOffer) return;
+
+  await startLocalMedia();
+  await createConnection();
+
+  await pc.setRemoteDescription(window.incomingOffer);
+
+  const answer = await pc.createAnswer();
+  await pc.setLocalDescription(answer);
+
+  ws.send(JSON.stringify({ type: "answer", roomId, answer }));
 };
 
-// Завершити
-hangupBtn.onclick = () => {
-  if (peerConnection) {
-    peerConnection.close();
-    peerConnection = null;
-  }
-  if (localStream) {
-    localStream.getTracks().forEach(t => t.stop());
-    localStream = null;
-  }
-  if (remoteStream) {
-    remoteStream.getTracks().forEach(t => t.stop());
-    remoteStream = null;
-  }
-  localVideo.srcObject = null;
-  remoteVideo.srcObject = null;
-  statusSpan.textContent = "Дзвінок завершено.";
+document.getElementById("hangupBtn").onclick = () => {
+  if (pc) pc.close();
+  pc = null;
 };
 
-// ================== WebRTC ЛОГІКА ==================
+async function startLocalMedia() {
+  localStream = await navigator.mediaDevices.getUserMedia({
+    video: { width: 320, height: 240 },
+    audio: true
+  });
 
-async function setupConnection(isInitiator) {
-  statusSpan.textContent = "Налаштування зʼєднання…";
-
-  try {
-    localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-  } catch (e) {
-    console.error("getUserMedia ERROR:", e);
-    alert("Камера/мікрофон недоступні: " + e.message);
-    return;
-  }
-
-  localVideo.srcObject = localStream;
-
-  if (peerConnection) {
-    peerConnection.close();
-    peerConnection = null;
-  }
-
-  peerConnection = new RTCPeerConnection(servers);
-
-  if (!remoteStream) {
-    remoteStream = new MediaStream();
-    remoteVideo.srcObject = remoteStream;
-  }
-
-  localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
-
-  peerConnection.ontrack = (event) => {
-    console.log("REMOTE TRACK RECEIVED", event.streams);
-    event.streams[0].getTracks().forEach(track => remoteStream.addTrack(track));
-  };
-
-  peerConnection.onicecandidate = (event) => {
-    if (event.candidate && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({
-        type: "ice",
-        candidate: event.candidate
-      }));
-    }
-  };
-
-  if (isInitiator) {
-    const offer = await peerConnection.createOffer();
-    await peerConnection.setLocalDescription(offer);
-
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({
-        type: "offer",
-        offer
-      }));
-    }
-
-    statusSpan.textContent = "Очікуємо відповідь…";
-  }
+  document.getElementById("localVideo").srcObject = localStream;
 }
 
-// Обробка offer (для того, хто відповідає)
-async function handleOffer(offer) {
-  statusSpan.textContent = "Отримано дзвінок. Налаштування…";
+async function createConnection() {
+  pc = new RTCPeerConnection(servers);
 
-  if (peerConnection) {
-    peerConnection.close();
-    peerConnection = null;
-  }
+  remoteStream = new MediaStream();
+  document.getElementById("remoteVideo").srcObject = remoteStream;
 
-  peerConnection = new RTCPeerConnection(servers);
+  localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
 
-  if (!remoteStream) {
-    remoteStream = new MediaStream();
-    remoteVideo.srcObject = remoteStream;
-  }
-
-  try {
-    localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-  } catch (e) {
-    console.error("getUserMedia ERROR:", e);
-    alert("Камера/мікрофон недоступні: " + e.message);
-    return;
-  }
-
-  localVideo.srcObject = localStream;
-
-  localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
-
-  peerConnection.ontrack = (event) => {
-    console.log("REMOTE TRACK RECEIVED", event.streams);
-    event.streams[0].getTracks().forEach(track => remoteStream.addTrack(track));
+  pc.ontrack = (e) => {
+    e.streams[0].getTracks().forEach(t => remoteStream.addTrack(t));
   };
 
-  peerConnection.onicecandidate = (event) => {
-    if (event.candidate && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({
-        type: "ice",
-        candidate: event.candidate
-      }));
+  pc.onicecandidate = (e) => {
+    if (e.candidate) {
+      ws.send(JSON.stringify({ type: "ice", roomId, candidate: e.candidate }));
     }
   };
-
-  await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
-
-  const answer = await peerConnection.createAnswer();
-  await peerConnection.setLocalDescription(answer);
-
-  if (ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({
-      type: "answer",
-      answer
-    }));
-  }
-
-  statusSpan.textContent = "Зʼєднано. Йде дзвінок.";
 }
