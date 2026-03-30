@@ -2,23 +2,18 @@
 <html lang="uk">
 <head>
   <meta charset="UTF-8">
-  <title>WebRTC PIN Room</title>
-  <style>
-    body { font-family: sans-serif; padding: 20px; }
-    input { padding: 10px; width: 250px; margin: 5px 0; }
-    button { padding: 12px 20px; margin: 5px; font-size: 16px; }
-    video { width: 100%; max-width: 300px; background: #000; margin: 10px 0; }
-  </style>
+  <title>Telegram WebRTC</title>
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-<h2>PIN‑кімната</h2>
+<h2>Telegram‑стиль відеодзвінок</h2>
 
 <input id="roomId" placeholder="Room ID">
 <input id="pin" placeholder="PIN">
 
 <br>
-<button id="joinBtn">Увійти</button>
+<button id="joinBtn" class="primary">Увійти</button>
 
 <h3>Локальне відео</h3>
 <video id="localVideo" autoplay playsinline muted></video>
@@ -26,13 +21,48 @@
 <h3>Віддалене відео</h3>
 <video id="remoteVideo" autoplay playsinline></video>
 
-<br>
-<button id="callBtn">Подзвонити</button>
-<button id="answerBtn">Відповісти</button>
-<button id="hangupBtn">Завершити</button>
+<div class="controls">
+  <button id="callBtn" class="primary">Подзвонити</button>
+  <button id="answerBtn" class="green">Відповісти</button>
+  <button id="hangupBtn" class="red">Завершити</button>
+</div>
 
-<h3>Статус:</h3>
+<div class="controls">
+  <button id="muteBtn">Mute</button>
+  <button id="cameraBtn">Camera Off</button>
+  <button id="switchBtn">Switch Cam</button>
+</div>
+
+<div class="controls">
+  <select id="quality">
+    <option value="low">Low (320×240)</option>
+    <option value="med">Medium (640×480)</option>
+    <option value="high">High (1280×720)</option>
+  </select>
+</div>
+
+<h3>Чат</h3>
+<div id="chatWindow" class="chat"></div>
+
+<div class="chatInput">
+  <input id="chatInput" placeholder="Написати повідомлення...">
+  <button id="sendChatBtn" class="primary">Send</button>
+</div>
+
+<h3>Учасники кімнати</h3>
+<div id="usersList" class="users"></div>
+
+<button id="themeBtn" class="primary">Темна тема</button>
+
+<div id="incomingCallUI" class="incoming">
+  <h3>Вхідний дзвінок</h3>
+  <button id="acceptCall" class="green">Прийняти</button>
+  <button id="declineCall" class="red">Відхилити</button>
+</div>
+
 <div id="status">Очікування…</div>
+
+<audio id="ringtone" src="ringtone.mp3" loop></audio>
 
 <script src="script.js"></script>
 </body>
