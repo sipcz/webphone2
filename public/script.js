@@ -3,10 +3,9 @@
 // WebSocket на Render
 const ws = new WebSocket(`wss://${window.location.host}`);
 
-let localStream;
-let remoteStream;
-let peerConnection;
-let SHARED_KEY = null; // ключ з PIN
+let localStream = null;
+let remoteStream = null;
+let peerConnection = null;
 
 const servers = {
   iceServers: [
@@ -28,91 +27,6 @@ ws.onopen = () => console.log("WS CONNECTED");
 ws.onerror = (e) => console.log("WS ERROR", e);
 ws.onclose = () => console.log("WS CLOSED");
 
-// ================== E2EE (Insertable Streams, PIN → ключ) ==================
-
-// Дуже простий “шифр” XOR (демо). Можна замінити на AES-GCM.
-function xorTransform(data, key) {
-  const out = new Uint8Array(data.length);
-  for (let i = 0; i < data.length; i++) {
-    out[i] = data[i] ^ key[i % key.length];
-  }
-  return out;
-}
-
-// Щоб не створювати encodedStreams двічі
-const processedSenders = new WeakSet();
-const processedReceivers = new WeakSet();
-
-// Шифрування вихідного відео (sender)
-async function enableSenderE2EE(pc) {
-  if (!SHARED_KEY) {
-    console.warn("No SHARED_KEY for sender E2EE");
-    return;
-  }
-  if (!("getSenders" in pc)) return;
-  const senders = pc.getSenders().filter(s => s.track && s.track.kind === "video");
-  if (!senders.length) return;
-
-  for (const sender of senders) {
-    if (processedSenders.has(sender)) continue;
-    if (!sender.createEncodedStreams) {
-      console.warn("Sender insertable streams not supported");
-      continue;
-    }
-
-    processedSenders.add(sender);
-
-    const { readable, writable } = sender.createEncodedStreams();
-
-    const transformStream = new TransformStream({
-      transform(chunk, controller) {
-        chunk.data = xorTransform(chunk.data, SHARED_KEY);
-        controller.enqueue(chunk);
-      }
-    });
-
-    readable
-      .pipeThrough(transformStream)
-      .pipeTo(writable)
-      .catch(e => console.warn("Sender E2EE error:", e));
-  }
-}
-
-// Розшифрування вхідного відео (receiver)
-async function enableReceiverE2EE(pc) {
-  if (!SHARED_KEY) {
-    console.warn("No SHARED_KEY for receiver E2EE");
-    return;
-  }
-  if (!("getReceivers" in pc)) return;
-  const receivers = pc.getReceivers().filter(r => r.track && r.track.kind === "video");
-  if (!receivers.length) return;
-
-  for (const receiver of receivers) {
-    if (processedReceivers.has(receiver)) continue;
-    if (!receiver.createEncodedStreams) {
-      console.warn("Receiver insertable streams not supported");
-      continue;
-    }
-
-    processedReceivers.add(receiver);
-
-    const { readable, writable } = receiver.createEncodedStreams();
-
-    const transformStream = new TransformStream({
-      transform(chunk, controller) {
-        chunk.data = xorTransform(chunk.data, SHARED_KEY);
-        controller.enqueue(chunk);
-      }
-    });
-
-    readable
-      .pipeThrough(transformStream)
-      .pipeTo(writable)
-      .catch(e => console.warn("Receiver E2EE error:", e));
-  }
-}
-
 // ================== JOIN / SIGNALING ==================
 
 // Вхід у кімнату
@@ -129,10 +43,6 @@ joinButton.onclick = () => {
     alert("WebSocket не підключений");
     return;
   }
-
-  // PIN → ключ (32 байти)
-  SHARED_KEY = new TextEncoder().encode(pin.toString().padEnd(32, "0"));
-  console.log("SHARED_KEY derived from PIN");
 
   ws.send(JSON.stringify({
     type: "join",
@@ -160,10 +70,6 @@ ws.onmessage = async (event) => {
   }
 
   if (data.type === "offer") {
-    if (peerConnection && peerConnection.signalingState !== "stable") {
-      console.warn("Ignoring offer in state:", peerConnection.signalingState);
-      return;
-    }
     await handleOffer(data.offer);
     return;
   }
@@ -171,7 +77,7 @@ ws.onmessage = async (event) => {
   if (data.type === "answer") {
     if (!peerConnection) return;
     if (peerConnection.signalingState !== "have-local-offer") {
-      console.warn("Ignoring duplicate answer in state:", peerConnection.signalingState);
+      console.warn("Ignoring answer in state:", peerConnection.signalingState);
       return;
     }
     await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
@@ -193,6 +99,10 @@ ws.onmessage = async (event) => {
 
 // Старт дзвінка (ініціатор)
 startCallBtn.onclick = async () => {
+  if (ws.readyState !== WebSocket.OPEN) {
+    alert("WebSocket не підключений");
+    return;
+  }
   await setupConnection(true);
 };
 
@@ -235,19 +145,27 @@ async function setupConnection(isInitiator) {
 
   localVideo.srcObject = localStream;
 
+  if (peerConnection) {
+    peerConnection.close();
+    peerConnection = null;
+  }
+
   peerConnection = new RTCPeerConnection(servers);
 
-  remoteStream = new MediaStream();
-  remoteVideo.srcObject = remoteStream;
+  if (!remoteStream) {
+    remoteStream = new MediaStream();
+    remoteVideo.srcObject = remoteStream;
+  }
 
   localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
 
   peerConnection.ontrack = (event) => {
+    console.log("REMOTE TRACK RECEIVED", event.streams);
     event.streams[0].getTracks().forEach(track => remoteStream.addTrack(track));
   };
 
   peerConnection.onicecandidate = (event) => {
-    if (event.candidate) {
+    if (event.candidate && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({
         type: "ice",
         candidate: event.candidate
@@ -255,18 +173,16 @@ async function setupConnection(isInitiator) {
     }
   };
 
-  // Увімкнути E2EE (без дублювань завдяки WeakSet)
-  enableSenderE2EE(peerConnection);
-  enableReceiverE2EE(peerConnection);
-
   if (isInitiator) {
     const offer = await peerConnection.createOffer();
     await peerConnection.setLocalDescription(offer);
 
-    ws.send(JSON.stringify({
-      type: "offer",
-      offer
-    }));
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: "offer",
+        offer
+      }));
+    }
 
     statusSpan.textContent = "Очікуємо відповідь…";
   }
@@ -276,8 +192,16 @@ async function setupConnection(isInitiator) {
 async function handleOffer(offer) {
   statusSpan.textContent = "Отримано дзвінок. Налаштування…";
 
-  if (!peerConnection || peerConnection.signalingState === "closed") {
-    peerConnection = new RTCPeerConnection(servers);
+  if (peerConnection) {
+    peerConnection.close();
+    peerConnection = null;
+  }
+
+  peerConnection = new RTCPeerConnection(servers);
+
+  if (!remoteStream) {
+    remoteStream = new MediaStream();
+    remoteVideo.srcObject = remoteStream;
   }
 
   try {
@@ -290,17 +214,15 @@ async function handleOffer(offer) {
 
   localVideo.srcObject = localStream;
 
-  remoteStream = new MediaStream();
-  remoteVideo.srcObject = remoteStream;
-
   localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
 
   peerConnection.ontrack = (event) => {
+    console.log("REMOTE TRACK RECEIVED", event.streams);
     event.streams[0].getTracks().forEach(track => remoteStream.addTrack(track));
   };
 
   peerConnection.onicecandidate = (event) => {
-    if (event.candidate) {
+    if (event.candidate && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({
         type: "ice",
         candidate: event.candidate
@@ -308,19 +230,17 @@ async function handleOffer(offer) {
     }
   };
 
-  // Увімкнути E2EE (ще раз викликати безпечно — WeakSet не дасть створити streams двічі)
-  enableSenderE2EE(peerConnection);
-  enableReceiverE2EE(peerConnection);
-
   await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
 
   const answer = await peerConnection.createAnswer();
   await peerConnection.setLocalDescription(answer);
 
-  ws.send(JSON.stringify({
-    type: "answer",
-    answer
-  }));
+  if (ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({
+      type: "answer",
+      answer
+    }));
+  }
 
   statusSpan.textContent = "Зʼєднано. Йде дзвінок.";
 }
