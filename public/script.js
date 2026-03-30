@@ -39,6 +39,10 @@ function xorTransform(data, key) {
   return out;
 }
 
+// Щоб не створювати encodedStreams двічі
+const processedSenders = new WeakSet();
+const processedReceivers = new WeakSet();
+
 // Шифрування вихідного відео (sender)
 async function enableSenderE2EE(pc) {
   if (!SHARED_KEY) {
@@ -50,10 +54,13 @@ async function enableSenderE2EE(pc) {
   if (!senders.length) return;
 
   for (const sender of senders) {
+    if (processedSenders.has(sender)) continue;
     if (!sender.createEncodedStreams) {
       console.warn("Sender insertable streams not supported");
       continue;
     }
+
+    processedSenders.add(sender);
 
     const { readable, writable } = sender.createEncodedStreams();
 
@@ -82,10 +89,13 @@ async function enableReceiverE2EE(pc) {
   if (!receivers.length) return;
 
   for (const receiver of receivers) {
+    if (processedReceivers.has(receiver)) continue;
     if (!receiver.createEncodedStreams) {
       console.warn("Receiver insertable streams not supported");
       continue;
     }
+
+    processedReceivers.add(receiver);
 
     const { readable, writable } = receiver.createEncodedStreams();
 
@@ -215,7 +225,14 @@ hangupBtn.onclick = () => {
 async function setupConnection(isInitiator) {
   statusSpan.textContent = "Налаштування зʼєднання…";
 
-  localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+  try {
+    localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+  } catch (e) {
+    console.error("getUserMedia ERROR:", e);
+    alert("Камера/мікрофон недоступні: " + e.message);
+    return;
+  }
+
   localVideo.srcObject = localStream;
 
   peerConnection = new RTCPeerConnection(servers);
@@ -238,7 +255,7 @@ async function setupConnection(isInitiator) {
     }
   };
 
-  // Увімкнути E2EE
+  // Увімкнути E2EE (без дублювань завдяки WeakSet)
   enableSenderE2EE(peerConnection);
   enableReceiverE2EE(peerConnection);
 
@@ -263,8 +280,20 @@ async function handleOffer(offer) {
     peerConnection = new RTCPeerConnection(servers);
   }
 
+  try {
+    localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+  } catch (e) {
+    console.error("getUserMedia ERROR:", e);
+    alert("Камера/мікрофон недоступні: " + e.message);
+    return;
+  }
+
+  localVideo.srcObject = localStream;
+
   remoteStream = new MediaStream();
   remoteVideo.srcObject = remoteStream;
+
+  localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
 
   peerConnection.ontrack = (event) => {
     event.streams[0].getTracks().forEach(track => remoteStream.addTrack(track));
@@ -279,12 +308,7 @@ async function handleOffer(offer) {
     }
   };
 
-  localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-  localVideo.srcObject = localStream;
-
-  localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
-
-  // Увімкнути E2EE
+  // Увімкнути E2EE (ще раз викликати безпечно — WeakSet не дасть створити streams двічі)
   enableSenderE2EE(peerConnection);
   enableReceiverE2EE(peerConnection);
 
