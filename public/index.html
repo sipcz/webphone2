@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <title>Secure WebRTC Call</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="container">
+
+  <h1>🔐 Secure WebRTC Video Call</h1>
+
+  <div class="room-box">
+    <input id="roomId" placeholder="ID кімнати (наприклад 123)" />
+    <input id="pin" placeholder="PIN (наприклад 7777)" />
+    <button id="joinRoom">Увійти в кімнату</button>
+  </div>
+
+  <div id="callUI" class="hidden">
+    <div class="video-wrapper">
+      <video id="localVideo" autoplay muted playsinline></video>
+      <video id="remoteVideo" autoplay playsinline></video>
+    </div>
+
+    <div class="controls">
+      <button id="startCall">📞 Почати дзвінок</button>
+      <button id="answerCall">📲 Відповісти</button>
+      <button id="hangup">❌ Завершити</button>
+    </div>
+
+    <div class="status">
+      Статус: <span id="status">Очікування…</span>
+    </div>
+  </div>
+
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>
