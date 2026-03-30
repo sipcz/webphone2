@@ -1,79 +1,23 @@
-const ws = new WebSocket(location.origin.replace(/^http/, "ws"));
-
-let roomId = null;
-let pin = null;
+const ws = new WebSocket(`wss://${window.location.host}`);
 
 let localStream;
-let pc;
+let remoteStream;
+let peerConnection;
 
 const servers = {
   iceServers: [
-    { urls: "stun:stun.l.google.com:19302" },
-    {
-      urls: "turn:global.relay.metered.ca:80",
-      username: "openai",
-      credential: "openai123"
-    }
+    { urls: "stun:stun.l.google.com:19302" }
   ]
 };
 
-function createPeer() {
-  pc = new RTCPeerConnection(servers);
+document.getElementById("joinBtn").onclick = () => {
+  const roomId = document.getElementById("room").value.trim();
+  const pin = document.getElementById("pin").value.trim();
 
-  pc.onicecandidate = e => {
-    if (e.candidate) {
-      ws.send(JSON.stringify({
-        type: "ice",
-        candidate: e.candidate
-      }));
-    }
-  };
-
-  pc.ontrack = e => {
-    document.getElementById("remoteVideo").srcObject = e.streams[0];
-  };
-}
-
-ws.onmessage = async msg => {
-  const data = JSON.parse(msg.data);
-
-  if (data.type === "error") {
-    alert(data.message);
+  if (!roomId || !pin) {
+    alert("Введи ID кімнати та PIN");
     return;
   }
-
-  if (data.type === "joined") {
-    document.getElementById("callUI").classList.remove("hidden");
-    document.getElementById("status").textContent = "Успішно увійшли в кімнату";
-    return;
-  }
-
-  if (data.type === "offer") {
-    document.getElementById("status").textContent = "Отримано дзвінок";
-
-    createPeer();
-
-    await pc.setRemoteDescription(data.offer);
-
-    localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-    document.getElementById("localVideo").srcObject = localStream;
-    localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
-
-  } else if (data.type === "answer") {
-    await pc.setRemoteDescription(data.answer);
-
-  } else if (data.type === "ice") {
-    try {
-      await pc.addIceCandidate(data.candidate);
-    } catch (e) {
-      console.error("ICE error", e);
-    }
-  }
-};
-
-document.getElementById("joinRoom").onclick = () => {
-  roomId = document.getElementById("roomId").value;
-  pin = document.getElementById("pin").value;
 
   ws.send(JSON.stringify({
     type: "join",
@@ -82,29 +26,108 @@ document.getElementById("joinRoom").onclick = () => {
   }));
 };
 
-document.getElementById("startCall").onclick = async () => {
-  createPeer();
+ws.onmessage = async (event) => {
+  const data = JSON.parse(event.data);
+
+  if (data.type === "error") {
+    alert(data.message);
+    return;
+  }
+
+  if (data.type === "joined") {
+    startCall();
+    return;
+  }
+
+  if (data.type === "offer") {
+    await handleOffer(data.offer);
+    return;
+  }
+
+  if (data.type === "answer") {
+    await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+    return;
+  }
+
+  if (data.type === "ice") {
+    if (peerConnection) {
+      await peerConnection.addIceCandidate(data.candidate);
+    }
+  }
+};
+
+async function startCall() {
+  localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+  document.getElementById("localVideo").srcObject = localStream;
+
+  peerConnection = new RTCPeerConnection(servers);
+
+  remoteStream = new MediaStream();
+  document.getElementById("remoteVideo").srcObject = remoteStream;
+
+  localStream.getTracks().forEach(track => {
+    peerConnection.addTrack(track, localStream);
+  });
+
+  peerConnection.ontrack = (event) => {
+    event.streams[0].getTracks().forEach(track => {
+      remoteStream.addTrack(track);
+    });
+  };
+
+  peerConnection.onicecandidate = (event) => {
+    if (event.candidate) {
+      ws.send(JSON.stringify({
+        type: "ice",
+        candidate: event.candidate
+      }));
+    }
+  };
+
+  const offer = await peerConnection.createOffer();
+  await peerConnection.setLocalDescription(offer);
+
+  ws.send(JSON.stringify({
+    type: "offer",
+    offer
+  }));
+}
+
+async function handleOffer(offer) {
+  peerConnection = new RTCPeerConnection(servers);
+
+  remoteStream = new MediaStream();
+  document.getElementById("remoteVideo").srcObject = remoteStream;
+
+  peerConnection.ontrack = (event) => {
+    event.streams[0].getTracks().forEach(track => {
+      remoteStream.addTrack(track);
+    });
+  };
+
+  peerConnection.onicecandidate = (event) => {
+    if (event.candidate) {
+      ws.send(JSON.stringify({
+        type: "ice",
+        candidate: event.candidate
+      }));
+    }
+  };
 
   localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
   document.getElementById("localVideo").srcObject = localStream;
-  localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
 
-  const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
+  localStream.getTracks().forEach(track => {
+    peerConnection.addTrack(track, localStream);
+  });
 
-  ws.send(JSON.stringify({ type: "offer", offer }));
-  document.getElementById("status").textContent = "Відправлено дзвінок";
-};
+  await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
 
-document.getElementById("answerCall").onclick = async () => {
-  const answer = await pc.createAnswer();
-  await pc.setLocalDescription(answer);
+  const answer = await peerConnection.createAnswer();
+  await peerConnection.setLocalDescription(answer);
 
-  ws.send(JSON.stringify({ type: "answer", answer }));
-  document.getElementById("status").textContent = "Відповідь відправлена";
-};
-
-document.getElementById("hangup").onclick = () => {
-  if (pc) pc.close();
-  document.getElementById("status").textContent = "Дзвінок завершено";
-};
+  ws.send(JSON.stringify({
+    type: "answer",
+    answer
+  }));
+}
