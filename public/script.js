@@ -4,7 +4,6 @@ const ws = new WebSocket(`wss://${window.location.host}`);
 let localStream;
 let remoteStream;
 let peerConnection;
-let isCaller = false;
 
 const servers = {
   iceServers: [
@@ -21,12 +20,12 @@ const statusSpan = document.getElementById("status");
 const localVideo = document.getElementById("localVideo");
 const remoteVideo = document.getElementById("remoteVideo");
 
-// Логи для діагностики
+// Логи
 ws.onopen = () => console.log("WS CONNECTED");
 ws.onerror = (e) => console.log("WS ERROR", e);
 ws.onclose = () => console.log("WS CLOSED");
 
-// Натискання "Увійти в кімнату"
+// Вхід у кімнату
 joinButton.onclick = () => {
   const roomId = document.getElementById("roomId").value.trim();
   const pin = document.getElementById("pin").value.trim();
@@ -50,7 +49,7 @@ joinButton.onclick = () => {
   console.log("JOIN SENT", roomId, pin);
 };
 
-// Обробка повідомлень від сервера
+// Обробка сигналінгу
 ws.onmessage = async (event) => {
   const data = JSON.parse(event.data);
   console.log("WS MESSAGE", data);
@@ -67,53 +66,66 @@ ws.onmessage = async (event) => {
   }
 
   if (data.type === "offer") {
-    isCaller = false;
+    // Якщо вже є peerConnection і він не в stable — ігноруємо
+    if (peerConnection && peerConnection.signalingState !== "stable") {
+      console.warn("Ignoring offer in state:", peerConnection.signalingState);
+      return;
+    }
     await handleOffer(data.offer);
     return;
   }
 
   if (data.type === "answer") {
-    if (peerConnection) {
-      await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
-      statusSpan.textContent = "Зʼєднано. Йде дзвінок.";
+    if (!peerConnection) return;
+    if (peerConnection.signalingState !== "have-local-offer") {
+      console.warn("Ignoring duplicate answer in state:", peerConnection.signalingState);
+      return;
     }
+    await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+    statusSpan.textContent = "Зʼєднано. Йде дзвінок.";
     return;
   }
 
   if (data.type === "ice") {
-    if (peerConnection) {
-      try {
-        await peerConnection.addIceCandidate(data.candidate);
-      } catch (e) {
-        console.error("Error adding ICE candidate", e);
-      }
+    if (!peerConnection || peerConnection.signalingState === "closed") return;
+    try {
+      await peerConnection.addIceCandidate(data.candidate);
+    } catch (e) {
+      console.warn("ICE ignored:", e);
     }
   }
 };
 
 // Старт дзвінка (ініціатор)
 startCallBtn.onclick = async () => {
-  isCaller = true;
   await setupConnection(true);
 };
 
-// Відповісти на дзвінок
+// Відповісти (по суті просто чекаємо offer)
 answerCallBtn.onclick = () => {
   alert("Очікуємо вхідний дзвінок…");
 };
 
-// Завершити дзвінок
+// Завершити
 hangupBtn.onclick = () => {
-  if (peerConnection) peerConnection.close();
-  if (localStream) localStream.getTracks().forEach(t => t.stop());
-  if (remoteStream) remoteStream.getTracks().forEach(t => t.stop());
-
+  if (peerConnection) {
+    peerConnection.close();
+    peerConnection = null;
+  }
+  if (localStream) {
+    localStream.getTracks().forEach(t => t.stop());
+    localStream = null;
+  }
+  if (remoteStream) {
+    remoteStream.getTracks().forEach(t => t.stop());
+    remoteStream = null;
+  }
   localVideo.srcObject = null;
   remoteVideo.srcObject = null;
   statusSpan.textContent = "Дзвінок завершено.";
 };
 
-// Налаштування PeerConnection
+// Створення PeerConnection + offer (для ініціатора)
 async function setupConnection(isInitiator) {
   statusSpan.textContent = "Налаштування зʼєднання…";
 
@@ -153,11 +165,13 @@ async function setupConnection(isInitiator) {
   }
 }
 
-// Обробка offer
+// Обробка offer (для того, хто відповідає)
 async function handleOffer(offer) {
   statusSpan.textContent = "Отримано дзвінок. Налаштування…";
 
-  peerConnection = new RTCPeerConnection(servers);
+  if (!peerConnection || peerConnection.signalingState === "closed") {
+    peerConnection = new RTCPeerConnection(servers);
+  }
 
   remoteStream = new MediaStream();
   remoteVideo.srcObject = remoteStream;
