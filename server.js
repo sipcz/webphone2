@@ -17,7 +17,6 @@ const wss = new WebSocketServer({ server });
 
 const rooms = new Map();
 
-// Keepalive for Render
 function heartbeat() { this.isAlive = true; }
 
 wss.on("connection", ws => {
@@ -47,10 +46,19 @@ wss.on("connection", ws => {
       ws.roomId = roomId;
 
       ws.send(JSON.stringify({ type: "joined" }));
+
+      // Update users list
+      room.clients.forEach(client => {
+        client.send(JSON.stringify({
+          type: "users",
+          users: room.clients.length
+        }));
+      });
+
       return;
     }
 
-    // SIGNALING
+    // BROADCAST SIGNALING + CHAT
     if (ws.roomId) {
       const room = rooms.get(ws.roomId);
       if (!room) return;
@@ -67,12 +75,22 @@ wss.on("connection", ws => {
     if (ws.roomId && rooms.has(ws.roomId)) {
       const room = rooms.get(ws.roomId);
       room.clients = room.clients.filter(c => c !== ws);
-      if (room.clients.length === 0) rooms.delete(ws.roomId);
+
+      if (room.clients.length === 0) {
+        rooms.delete(ws.roomId);
+      } else {
+        room.clients.forEach(client => {
+          client.send(JSON.stringify({
+            type: "users",
+            users: room.clients.length
+          }));
+        });
+      }
     }
   });
 });
 
-// Ping every 30 sec
+// Keepalive for Render
 setInterval(() => {
   wss.clients.forEach(ws => {
     if (!ws.isAlive) return ws.terminate();
