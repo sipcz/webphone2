@@ -1,9 +1,5 @@
-// Підключення до WebSocket (Render + локально)
-const ws = new WebSocket(
-  location.hostname === "localhost"
-    ? "ws://localhost:3000"
-    : `wss://${window.location.host}`
-);
+// Підключення до WebSocket на Render
+const ws = new WebSocket(`wss://${window.location.host}`);
 
 let localStream;
 let remoteStream;
@@ -25,7 +21,7 @@ const statusSpan = document.getElementById("status");
 const localVideo = document.getElementById("localVideo");
 const remoteVideo = document.getElementById("remoteVideo");
 
-// ЛОГИ ДЛЯ ДІАГНОСТИКИ
+// Логи для діагностики
 ws.onopen = () => console.log("WS CONNECTED");
 ws.onerror = (e) => console.log("WS ERROR", e);
 ws.onclose = () => console.log("WS CLOSED");
@@ -101,33 +97,23 @@ startCallBtn.onclick = async () => {
   await setupConnection(true);
 };
 
-// Відповісти на дзвінок (другий клієнт)
-answerCallBtn.onclick = async () => {
-  isCaller = false;
-  // Нічого не робимо тут — логіка в handleOffer
+// Відповісти на дзвінок
+answerCallBtn.onclick = () => {
   alert("Очікуємо вхідний дзвінок…");
 };
 
 // Завершити дзвінок
 hangupBtn.onclick = () => {
-  if (peerConnection) {
-    peerConnection.close();
-    peerConnection = null;
-  }
-  if (localStream) {
-    localStream.getTracks().forEach(t => t.stop());
-    localStream = null;
-  }
-  if (remoteStream) {
-    remoteStream.getTracks().forEach(t => t.stop());
-    remoteStream = null;
-  }
+  if (peerConnection) peerConnection.close();
+  if (localStream) localStream.getTracks().forEach(t => t.stop());
+  if (remoteStream) remoteStream.getTracks().forEach(t => t.stop());
+
   localVideo.srcObject = null;
   remoteVideo.srcObject = null;
   statusSpan.textContent = "Дзвінок завершено.";
 };
 
-// Налаштування PeerConnection і відправка offer (для ініціатора)
+// Налаштування PeerConnection
 async function setupConnection(isInitiator) {
   statusSpan.textContent = "Налаштування зʼєднання…";
 
@@ -139,14 +125,10 @@ async function setupConnection(isInitiator) {
   remoteStream = new MediaStream();
   remoteVideo.srcObject = remoteStream;
 
-  localStream.getTracks().forEach(track => {
-    peerConnection.addTrack(track, localStream);
-  });
+  localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
 
   peerConnection.ontrack = (event) => {
-    event.streams[0].getTracks().forEach(track => {
-      remoteStream.addTrack(track);
-    });
+    event.streams[0].getTracks().forEach(track => remoteStream.addTrack(track));
   };
 
   peerConnection.onicecandidate = (event) => {
@@ -171,7 +153,7 @@ async function setupConnection(isInitiator) {
   }
 }
 
-// Обробка offer (для того, хто відповідає)
+// Обробка offer
 async function handleOffer(offer) {
   statusSpan.textContent = "Отримано дзвінок. Налаштування…";
 
@@ -181,9 +163,7 @@ async function handleOffer(offer) {
   remoteVideo.srcObject = remoteStream;
 
   peerConnection.ontrack = (event) => {
-    event.streams[0].getTracks().forEach(track => {
-      remoteStream.addTrack(track);
-    });
+    event.streams[0].getTracks().forEach(track => remoteStream.addTrack(track));
   };
 
   peerConnection.onicecandidate = (event) => {
@@ -198,9 +178,7 @@ async function handleOffer(offer) {
   localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
   localVideo.srcObject = localStream;
 
-  localStream.getTracks().forEach(track => {
-    peerConnection.addTrack(track, localStream);
-  });
+  localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
 
   await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
 
