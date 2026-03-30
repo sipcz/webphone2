@@ -2,20 +2,23 @@
 <html lang="uk">
 <head>
   <meta charset="UTF-8">
-  <title>Mobile WebRTC</title>
+  <title>WebRTC PIN Room</title>
   <style>
     body { font-family: sans-serif; padding: 20px; }
-    video { width: 100%; max-width: 300px; background: #000; margin: 10px 0; }
+    input { padding: 10px; width: 250px; margin: 5px 0; }
     button { padding: 12px 20px; margin: 5px; font-size: 16px; }
+    video { width: 100%; max-width: 300px; background: #000; margin: 10px 0; }
   </style>
 </head>
 <body>
 
-<h2>Мобільний WebRTC</h2>
+<h2>PIN‑кімната</h2>
 
-<input id="room" placeholder="ID кімнати">
+<input id="roomId" placeholder="Room ID">
+<input id="pin" placeholder="PIN">
+
 <br>
-<button id="join">Увійти</button>
+<button id="joinBtn">Увійти</button>
 
 <h3>Локальне відео</h3>
 <video id="localVideo" autoplay playsinline muted></video>
@@ -27,6 +30,9 @@
 <button id="callBtn">Подзвонити</button>
 <button id="answerBtn">Відповісти</button>
 <button id="hangupBtn">Завершити</button>
+
+<h3>Статус:</h3>
+<div id="status">Очікування…</div>
 
 <script src="script.js"></script>
 </body>
