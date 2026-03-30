@@ -8,8 +8,6 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-
-// Статика
 app.use(express.static(path.join(__dirname, "public")));
 
 app.get("/", (req, res) => {
@@ -17,16 +15,24 @@ app.get("/", (req, res) => {
 });
 
 const server = app.listen(process.env.PORT || 3000, () => {
-  console.log("Server running on port", process.env.PORT || 3000);
+  console.log("Server running");
 });
 
 const wss = new WebSocketServer({ server });
 
 const rooms = new Map();
 
+// === Render WebSocket keepalive ===
+function heartbeat() {
+  this.isAlive = true;
+}
+
 wss.on("connection", ws => {
   ws.id = uuid();
   ws.room = null;
+  ws.isAlive = true;
+
+  ws.on("pong", heartbeat);
 
   ws.on("message", raw => {
     let data;
@@ -53,8 +59,8 @@ wss.on("connection", ws => {
       if (!room.clients.includes(ws)) {
         room.clients.push(ws);
       }
-      ws.room = roomId;
 
+      ws.room = roomId;
       ws.send(JSON.stringify({ type: "joined" }));
       return;
     }
@@ -76,9 +82,18 @@ wss.on("connection", ws => {
       const room = rooms.get(ws.room);
       if (!room) return;
       room.clients = room.clients.filter(c => c !== ws);
-      if (room.clients.length === 0) {
-        rooms.delete(ws.room);
-      }
+      if (room.clients.length === 0) rooms.delete(ws.room);
     }
   });
 });
+
+// === Ping every 30 seconds ===
+const interval = setInterval(() => {
+  wss.clients.forEach(ws => {
+    if (!ws.isAlive) return ws.terminate();
+    ws.isAlive = false;
+    ws.ping();
+  });
+}, 30000);
+
+wss.on("close", () => clearInterval(interval));
