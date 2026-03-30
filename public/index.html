@@ -2,39 +2,31 @@
 <html lang="uk">
 <head>
   <meta charset="UTF-8">
-  <title>Secure WebRTC Call</title>
-  <link rel="stylesheet" href="style.css">
+  <title>Mobile WebRTC</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; }
+    video { width: 100%; max-width: 300px; background: #000; margin: 10px 0; }
+    button { padding: 12px 20px; margin: 5px; font-size: 16px; }
+  </style>
 </head>
 <body>
 
-<div class="container">
+<h2>Мобільний WebRTC</h2>
 
-  <h1>🔐 Secure WebRTC Video Call</h1>
+<input id="room" placeholder="ID кімнати">
+<br>
+<button id="join">Увійти</button>
 
-  <div class="room-box">
-    <input id="roomId" placeholder="ID кімнати (наприклад 123)" />
-    <input id="pin" placeholder="PIN (наприклад 7777)" />
-    <button id="joinRoom">Увійти в кімнату</button>
-  </div>
+<h3>Локальне відео</h3>
+<video id="localVideo" autoplay playsinline muted></video>
 
-  <div id="callUI" class="hidden">
-    <div class="video-wrapper">
-      <video id="localVideo" autoplay muted playsinline></video>
-      <video id="remoteVideo" autoplay playsinline></video>
-    </div>
+<h3>Віддалене відео</h3>
+<video id="remoteVideo" autoplay playsinline></video>
 
-    <div class="controls">
-      <button id="startCall">📞 Почати дзвінок</button>
-      <button id="answerCall">📲 Відповісти</button>
-      <button id="hangup">❌ Завершити</button>
-    </div>
-
-    <div class="status">
-      Статус: <span id="status">Очікування…</span>
-    </div>
-  </div>
-
-</div>
+<br>
+<button id="callBtn">Подзвонити</button>
+<button id="answerBtn">Відповісти</button>
+<button id="hangupBtn">Завершити</button>
 
 <script src="script.js"></script>
 </body>
