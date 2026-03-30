@@ -1,4 +1,8 @@
-const ws = new WebSocket(`wss://${window.location.host}`);
+const ws = new WebSocket(
+  location.protocol === "https:"
+    ? `wss://${window.location.host}`
+    : `ws://${window.location.host}`
+);
 
 let pc = null;
 let localStream = null;
@@ -85,19 +89,30 @@ ws.onmessage = async (event) => {
   }
 
   if (data.type === "offer") {
+    // НЕ обробляємо одразу — чекаємо, поки юзер натисне "Відповісти"
     window.incomingOffer = data.offer;
-    ringtone.play();
+    ringtone.currentTime = 0;
+    ringtone.play().catch(() => {});
     incomingUI.style.display = "block";
+    statusDiv.textContent = "Вхідний дзвінок…";
     return;
   }
 
   if (data.type === "answer") {
-    if (pc) await pc.setRemoteDescription(data.answer);
+    if (pc && !pc.remoteDescription) {
+      await pc.setRemoteDescription(data.answer).catch(console.error);
+    }
     return;
   }
 
   if (data.type === "ice") {
-    if (pc) await pc.addIceCandidate(data.candidate);
+    if (pc) {
+      try {
+        await pc.addIceCandidate(data.candidate);
+      } catch (e) {
+        console.error("addIceCandidate error", e);
+      }
+    }
   }
 };
 
@@ -211,21 +226,31 @@ async function createConnection() {
       ws.send(JSON.stringify({ type: "ice", roomId, candidate: e.candidate }));
     }
   };
+
+  pc.onconnectionstatechange = () => {
+    console.log("PC state:", pc.connectionState);
+  };
 }
 
-// ===== CALL =====
+// ===== CALL (ініціатор) =====
 document.getElementById("callBtn").onclick = async () => {
+  if (!roomId) return alert("Спочатку увійди в кімнату");
+
   await startLocalMedia();
   await createConnection();
 
-  const offer = await pc.createOffer();
+  const offer = await pc.createOffer({
+    offerToReceiveAudio: true,
+    offerToReceiveVideo: true
+  });
+
   await pc.setLocalDescription(offer);
 
   ws.send(JSON.stringify({ type: "offer", roomId, offer }));
   statusDiv.textContent = "Виклик…";
 };
 
-// ===== ANSWER =====
+// ===== ANSWER (відповідач) =====
 document.getElementById("answerBtn").onclick = async () => {
   if (!window.incomingOffer) return;
 
@@ -252,6 +277,8 @@ document.getElementById("acceptCall").onclick = () => {
 document.getElementById("declineCall").onclick = () => {
   ringtone.pause();
   incomingUI.style.display = "none";
+  window.incomingOffer = null;
+  statusDiv.textContent = "Відхилено";
 };
 
 // ===== HANGUP =====
@@ -265,7 +292,7 @@ document.getElementById("hangupBtn").onclick = () => {
 document.getElementById("muteBtn").onclick = () => {
   if (!localStream) return;
   isMuted = !isMuted;
-  localStream.getAudioTracks()[0].enabled = !isMuted;
+  localStream.getAudioTracks().forEach(t => t.enabled = !isMuted);
   document.getElementById("muteBtn").textContent = isMuted ? "Unmute" : "Mute";
 };
 
@@ -273,7 +300,7 @@ document.getElementById("muteBtn").onclick = () => {
 document.getElementById("cameraBtn").onclick = () => {
   if (!localStream) return;
   isCameraOff = !isCameraOff;
-  localStream.getVideoTracks()[0].enabled = !isCameraOff;
+  localStream.getVideoTracks().forEach(t => t.enabled = !isCameraOff);
   document.getElementById("cameraBtn").textContent = isCameraOff ? "Camera On" : "Camera Off";
 };
 
