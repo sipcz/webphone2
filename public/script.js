@@ -4,20 +4,35 @@ let pc = null;
 let localStream = null;
 let remoteStream = null;
 let roomId = null;
+let pin = null;
 
 const servers = {
   iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
 };
 
-document.getElementById("join").onclick = () => {
-  roomId = document.getElementById("room").value.trim();
-  if (!roomId) return alert("Введіть ID кімнати");
+const statusDiv = document.getElementById("status");
 
-  ws.send(JSON.stringify({ type: "join", roomId }));
+document.getElementById("joinBtn").onclick = () => {
+  roomId = document.getElementById("roomId").value.trim();
+  pin = document.getElementById("pin").value.trim();
+
+  if (!roomId || !pin) return alert("Введіть Room ID і PIN");
+
+  ws.send(JSON.stringify({ type: "join", roomId, pin }));
 };
 
 ws.onmessage = async (event) => {
   const data = JSON.parse(event.data);
+
+  if (data.type === "error") {
+    alert(data.message);
+    return;
+  }
+
+  if (data.type === "joined") {
+    statusDiv.textContent = "У кімнаті. Можна дзвонити.";
+    return;
+  }
 
   if (data.type === "offer") {
     window.incomingOffer = data.offer;
@@ -34,13 +49,14 @@ ws.onmessage = async (event) => {
 };
 
 document.getElementById("callBtn").onclick = async () => {
-  await startLocalMedia();   // ← мобільний браузер дозволяє тільки після кліку
+  await startLocalMedia();
   await createConnection();
 
   const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
 
   ws.send(JSON.stringify({ type: "offer", roomId, offer }));
+  statusDiv.textContent = "Виклик…";
 };
 
 document.getElementById("answerBtn").onclick = async () => {
@@ -55,11 +71,13 @@ document.getElementById("answerBtn").onclick = async () => {
   await pc.setLocalDescription(answer);
 
   ws.send(JSON.stringify({ type: "answer", roomId, answer }));
+  statusDiv.textContent = "Зʼєднано";
 };
 
 document.getElementById("hangupBtn").onclick = () => {
   if (pc) pc.close();
   pc = null;
+  statusDiv.textContent = "Завершено";
 };
 
 async function startLocalMedia() {
