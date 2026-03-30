@@ -9,19 +9,17 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 
-// ВАЖЛИВО: правильно вказуємо шлях до public
+// Статика
 app.use(express.static(path.join(__dirname, "public")));
 
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
-// Запускаємо HTTP сервер
 const server = app.listen(process.env.PORT || 3000, () => {
   console.log("Server running on port", process.env.PORT || 3000);
 });
 
-// WebSocket сервер
 const wss = new WebSocketServer({ server });
 
 const rooms = new Map();
@@ -30,8 +28,13 @@ wss.on("connection", ws => {
   ws.id = uuid();
   ws.room = null;
 
-  ws.on("message", msg => {
-    const data = JSON.parse(msg);
+  ws.on("message", raw => {
+    let data;
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      return;
+    }
 
     if (data.type === "join") {
       const { roomId, pin } = data;
@@ -47,7 +50,9 @@ wss.on("connection", ws => {
         return;
       }
 
-      room.clients.push(ws);
+      if (!room.clients.includes(ws)) {
+        room.clients.push(ws);
+      }
       ws.room = roomId;
 
       ws.send(JSON.stringify({ type: "joined" }));
@@ -56,6 +61,8 @@ wss.on("connection", ws => {
 
     if (ws.room) {
       const room = rooms.get(ws.room);
+      if (!room) return;
+
       room.clients.forEach(client => {
         if (client !== ws && client.readyState === 1) {
           client.send(JSON.stringify(data));
@@ -67,7 +74,11 @@ wss.on("connection", ws => {
   ws.on("close", () => {
     if (ws.room) {
       const room = rooms.get(ws.room);
+      if (!room) return;
       room.clients = room.clients.filter(c => c !== ws);
+      if (room.clients.length === 0) {
+        rooms.delete(ws.room);
+      }
     }
   });
 });
