@@ -8,12 +8,20 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
+
+// ВАЖЛИВО: правильно вказуємо шлях до public
 app.use(express.static(path.join(__dirname, "public")));
 
-const server = app.listen(process.env.PORT || 3000, () =>
-  console.log("Server running")
-);
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
+});
 
+// Запускаємо HTTP сервер
+const server = app.listen(process.env.PORT || 3000, () => {
+  console.log("Server running on port", process.env.PORT || 3000);
+});
+
+// WebSocket сервер
 const wss = new WebSocketServer({ server });
 
 const rooms = new Map();
